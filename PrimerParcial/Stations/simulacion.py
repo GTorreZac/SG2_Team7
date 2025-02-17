@@ -61,6 +61,7 @@ class MaintenanceSchedule:
         """Generate preventive maintenance schedule for each workstation"""
         schedule = {}
         for i in range(self.facility.config.NUM_WORKSTATIONS):
+            # Schedule maintenance every 500 time units with some randomness
             interval = random.normalvariate(500, 50)
             schedule[i] = interval
         return schedule
@@ -69,8 +70,8 @@ class MaintenanceSchedule:
         """Execute maintenance schedule"""
         while True:
             for station_id, interval in self.schedule.items():
-                if self.env.now % interval < 1:  
-                    maintenance_time = random.expovariate(1/4)  
+                if self.env.now % interval < 1:  # Allow for some flexibility
+                    maintenance_time = random.expovariate(1/4)  # Mean 4 time units
                     self.maintenance_log.append({
                         'station_id': station_id,
                         'time': self.env.now,
@@ -91,7 +92,7 @@ class SupplyChain:
         """Monitor and log stock levels"""
         while True:
             for i in range(self.facility.config.NUM_WORKSTATIONS):
-                if self.stock_levels[i] < self.facility.config.BIN_CAPACITY * 0.2: 
+                if self.stock_levels[i] < self.facility.config.BIN_CAPACITY * 0.2:  # 20% threshold
                     self.restock_events.append({
                         'station_id': i,
                         'time': self.env.now,
@@ -104,10 +105,12 @@ class ManufacturingFacility:
         self.env = env
         self.config = config
         
+        # Resources
         self.workstations = [simpy.Resource(env, capacity=1) 
                             for _ in range(config.NUM_WORKSTATIONS)]
         self.supplier = simpy.Resource(env, capacity=config.NUM_SUPPLIERS)
         
+        # State tracking
         self.bins = [config.BIN_CAPACITY for _ in range(config.NUM_WORKSTATIONS)]
         self.production_count = 0
         self.faulty_count = 0
@@ -115,6 +118,7 @@ class ManufacturingFacility:
         self.supplier_occupancy = 0
         self.processed_items = [0] * config.NUM_WORKSTATIONS
         
+        # Performance metrics
         self.total_fix_time = 0
         self.total_bottleneck_delay = 0
         self.workstation_wait_time = [0] * config.NUM_WORKSTATIONS
@@ -124,6 +128,7 @@ class ManufacturingFacility:
         self.operating_costs = 0
         self.revenue = 0
         
+        # Initialize subsystems
         self.maintenance = MaintenanceSchedule(env, self)
         self.supply_chain = SupplyChain(env, self)
 
@@ -133,6 +138,7 @@ class ManufacturingFacility:
             start_time = self.env.now
             
             if self.bins[station_id] > 0:
+                # Process time calculation
                 process_time = max(0, random.gauss(
                     self.config.WORK_TIME_MEAN,
                     self.config.WORK_TIME_STD
@@ -142,6 +148,7 @@ class ManufacturingFacility:
                 self.bins[station_id] -= 1
                 self.processed_items[station_id] += 1
                 
+                # Equipment failure handling
                 if random.random() < self.config.FAILURE_PROBS[station_id]:
                     repair_time = random.expovariate(1 / self.config.FIXING_TIME_MEAN)
                     self.total_fix_time += repair_time
@@ -149,6 +156,7 @@ class ManufacturingFacility:
                     self.maintenance_costs += repair_time * self.config.MAINTENANCE_COST_PER_HOUR
                     yield self.env.timeout(repair_time)
                 
+                # Quality control for final station
                 if station_id == self.config.NUM_WORKSTATIONS - 1:
                     if random.random() < self.config.QUALITY_ISSUE_PROB:
                         self.faulty_count += 1
@@ -161,6 +169,7 @@ class ManufacturingFacility:
                         self.production_count += 1
                         self.revenue += self.config.PRODUCT_VALUE
                 
+                # Record cycle time
                 self.cycle_times[station_id].append(self.env.now - start_time)
                 
             else:
@@ -185,9 +194,9 @@ class ManufacturingFacility:
                         self.supplier_occupancy += delay
                         yield self.env.timeout(delay)
                         
-                        
+                        # Partial restock if supply chain issues
                         restock_amount = self.config.BIN_CAPACITY
-                        if random.random() < 0.1:  
+                        if random.random() < 0.1:  # 10% chance of supply issue
                             restock_amount = int(self.config.BIN_CAPACITY * random.uniform(0.5, 0.8))
                         
                         self.bins[i] = min(self.config.BIN_CAPACITY, 
@@ -200,7 +209,7 @@ class ManufacturingFacility:
         while True:
             if random.random() < self.config.FACILITY_ACCIDENT_PROB:
                 downtime = random.randint(5, 50)
-                accident_cost = downtime * self.config.MAINTENANCE_COST_PER_HOUR * 2  
+                accident_cost = downtime * self.config.MAINTENANCE_COST_PER_HOUR * 2  # Double cost for accidents
                 
                 for i in range(self.config.NUM_WORKSTATIONS):
                     self.total_downtime[i] += downtime
@@ -232,6 +241,7 @@ def run_simulation(config: SimConfig = None):
         env = simpy.Environment()
         factory = ManufacturingFacility(env, config)
         
+        # Start all processes
         for i in range(config.NUM_WORKSTATIONS):
             env.process(factory.workstation_process(i))
         env.process(factory.restocking_process())
@@ -270,6 +280,7 @@ def visualize_results(results):
     plt.style.use('seaborn')
     fig = plt.figure(figsize=(15, 10))
     
+    # Production metrics
     plt.subplot(2, 3, 1)
     production_data = [r['final_production'] for r in results]
     plt.hist(production_data, bins=20, color='blue', alpha=0.7)
@@ -277,6 +288,7 @@ def visualize_results(results):
     plt.xlabel("Units Produced")
     plt.ylabel("Frequency")
     
+    # Financial metrics
     plt.subplot(2, 3, 2)
     profit_data = [r['profit'] for r in results]
     plt.hist(profit_data, bins=20, color='green', alpha=0.7)
@@ -284,6 +296,7 @@ def visualize_results(results):
     plt.xlabel("Profit")
     plt.ylabel("Frequency")
     
+    # Workstation utilization
     plt.subplot(2, 3, 3)
     utilization_data = np.array([r['station_utilization'] for r in results])
     plt.boxplot(utilization_data)
@@ -291,6 +304,7 @@ def visualize_results(results):
     plt.xlabel("Workstation")
     plt.ylabel("Utilization Rate")
     
+    # Downtime analysis
     plt.subplot(2, 3, 4)
     downtime_data = np.array([r['downtime_per_ws'] for r in results])
     plt.boxplot(downtime_data)
@@ -298,6 +312,7 @@ def visualize_results(results):
     plt.xlabel("Workstation")
     plt.ylabel("Downtime")
     
+    # Quality metrics
     plt.subplot(2, 3, 5)
     quality_rate = [(r['final_production']/(r['final_production'] + r['faulty_products']))*100 
                    for r in results]
@@ -306,6 +321,7 @@ def visualize_results(results):
     plt.xlabel("Quality Rate (%)")
     plt.ylabel("Frequency")
     
+    # Bottleneck analysis
     plt.subplot(2, 3, 6)
     bottleneck_counts = np.bincount([r['bottleneck_station'] for r in results], 
                                   minlength=SimConfig.NUM_WORKSTATIONS)
@@ -319,9 +335,13 @@ def visualize_results(results):
 
 def main():
     """Main execution function"""
+    # Run simulation with default configuration
     results = run_simulation()
+    
+    # Create visualizations
     fig = visualize_results(results)
     
+    # Calculate and display summary statistics
     summary_stats = {
         'avg_production': np.mean([r['final_production'] for r in results]),
         'avg_profit': np.mean([r['profit'] for r in results]),
